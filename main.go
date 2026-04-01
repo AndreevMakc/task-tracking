@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 )
 
-const tenant = "my-tenant"
+const defaultTenant = "my-tenant"
 
 type App struct {
 	Storage Storage
@@ -40,12 +40,20 @@ type TaskView struct {
 	Status  string `json:"status"`
 }
 
-func (app App) init() (Storage, error) {
+func newApp() (*App, error) {
 	storage, err := loadFile()
 	if err != nil {
-		panic(fmt.Sprint("app init failed:", err))
+		return nil, fmt.Errorf("app init failed: %w", err)
 	}
-	return storage, nil
+	var currentTenant string
+	if len(os.Args) > 1 {
+		currentTenant = os.Args[1]
+	}
+	currentTask, err := storage.findOrCreateTaskTenant(currentTenant)
+	if err != nil {
+		return nil, fmt.Errorf("app init failed: %w", err)
+	}
+	return &App{Storage: storage, Current: currentTask}, nil
 }
 
 func loadFile() (Storage, error) {
@@ -67,6 +75,9 @@ func loadFile() (Storage, error) {
 }
 
 func (storage *Storage) findOrCreateTaskTenant(tenant string) (*TenantTask, error) {
+	if tenant == "" {
+		tenant = defaultTenant
+	}
 	for index := range storage.Items {
 		if storage.Items[index].Tenant == tenant {
 			return &storage.Items[index], nil
@@ -74,6 +85,10 @@ func (storage *Storage) findOrCreateTaskTenant(tenant string) (*TenantTask, erro
 	}
 	storage.Items = append(storage.Items, TenantTask{Tenant: tenant})
 	return &storage.Items[len(storage.Items)-1], nil
+}
+
+func getAllTasks(tenantTask *TenantTask) ([]Task, error) {
+	return tenantTask.Tasks, nil
 }
 
 func humanId(tenant string, seqId int) string {
@@ -84,11 +99,12 @@ func genUUID() string {
 	return uuid.New().String()
 }
 
-func createTask(text string) (Task, error) {
+func createTask(text string, tenantTask *TenantTask) (Task, error) {
 	if text == "" {
 		return Task{}, fmt.Errorf("task title is required")
 	}
-	return Task{ID: genUUID(), Title: text, IsDone: false}, nil
+	tenantTask.Counter = tenantTask.Counter + 1
+	return Task{ID: genUUID(), SeqId: tenantTask.Counter, Title: text, IsDone: false}, nil
 }
 
 func handleInputCmd(text string) (cmd string, taskTitle string) {
@@ -102,8 +118,8 @@ func handleInputCmd(text string) (cmd string, taskTitle string) {
 
 const filePath = "tasks.json"
 
-func saveFile(tasks []Task) error {
-	data, err := json.MarshalIndent(tasks, "", " ")
+func saveFile(storage Storage) error {
+	data, err := json.MarshalIndent(storage, "", " ")
 	if err != nil {
 		return fmt.Errorf("serialization error: %w", err)
 	}
@@ -124,63 +140,43 @@ func taskDone(taskId string, tasks []Task) ([]Task, error) {
 }
 
 func main() {
-	var app App
-	storage, err := app.init()
+	app, err := newApp()
 	if err != nil {
-		panic(err)
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
 	}
-	tasks, _ := storage.findOrCreateTaskTenant(tenant)
 	scanner := bufio.NewScanner(os.Stdin)
 	fmt.Println("---Task tracking is running---")
 	fmt.Println("Type 'add', 'list', 'done' or 'exit'")
-	for i := range tasks.Tasks {
-		fmt.Println(humanId(tasks.Tenant, tasks.Tasks[i].SeqId))
-	}
-	// for {
-	// 	fmt.Print("> ")
-	// 	if !scanner.Scan() {
-	// 		break
-	// 	}
-	// 	text := scanner.Text()
-	// 	cmd, params := handleInputCmd(text)
-	// 	switch cmd {
-	// 	case "exit":
-	// 		if err := saveFile(tasks); err != nil {
-	// 			fmt.Fprintf(os.Stderr, "File save error: %s\n", err)
-	// 		}
-	// 		fmt.Println("Goodbye")
-	// 		return
-	// 	case "add":
-	// 		task, err := createTask(params)
-	// 		if err != nil {
-	// 			fmt.Fprintf(os.Stderr, "Task add error: %s\n", err)
-	// 			continue
-	// 		}
-	// 		tasks = append(tasks, task)
-	// 		fmt.Printf("Task '%s' has been added\n", task.Title)
-	// 	case "list":
-	// 		if len(tasks) == 0 {
-	// 			fmt.Println("No tasks yet")
-	// 			continue
-	// 		}
-	// 		for _, v := range tasks {
-	// 			fmt.Printf("[%s] %s - %t\n", v.ID, v.Title, v.IsDone)
-	// 		}
-	// 	case "done":
-	// 		updatedTasks, err := taskDone(params, tasks)
-	// 		if err != nil {
-	// 			fmt.Fprintf(os.Stderr, "Task done error: %s\n", err)
-	// 			continue
-	// 		}
-	// 		tasks = updatedTasks
-	// 		fmt.Printf("Task %s has been done\n", params)
-	// 	case "":
-	// 		continue
-	// 	default:
-	// 		fmt.Printf("Unknown command: %s\n", cmd)
-	// 	}
-	// }
-	if err := scanner.Err(); err != nil {
-		fmt.Fprintln(os.Stderr, "reading standart input: ", err)
+	for {
+		fmt.Print(">")
+		if !scanner.Scan() {
+			break
+		}
+		text := scanner.Text()
+		cmd, params := handleInputCmd(text)
+		switch cmd {
+		case "exit":
+			if err := saveFile(app.Storage); err != nil {
+				fmt.Fprintf(os.Stderr, "File save error: %s\n", err)
+			}
+			fmt.Println("Goodbye")
+			return
+		case "add":
+			task, err := createTask(params, app.Current)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Task add error: %s\n", err)
+				continue
+			}
+			app.Current.Tasks = append(app.Current.Tasks, task)
+		case "list":
+			if len(app.Current.Tasks) == 0 {
+				fmt.Println("No tasks yet")
+				continue
+			}
+			for _, v := range app.Current.Tasks {
+				fmt.Printf("[%s] %s - %t\n", v.ID, v.Title, v.IsDone)
+			}
+		}
 	}
 }
