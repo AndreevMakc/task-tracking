@@ -175,7 +175,7 @@ func main() {
 				continue
 			}
 			for _, v := range app.Current.Tasks {
-				fmt.Printf("[%s] %s - %t\n", v.ID, v.Title, v.IsDone)
+				fmt.Printf("[%s] %s - %t\n", humanId(app.Current.Tenant, v.SeqId), v.Title, v.IsDone)
 			}
 		}
 	}
