@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -32,12 +33,6 @@ type Task struct {
 	SeqId  int    `json:"seq_id"`
 	Title  string `json:"title"`
 	IsDone bool   `json:"is_done"`
-}
-
-type TaskView struct {
-	HumanId string `json:"id"`
-	Title   string `json:"title"`
-	Status  string `json:"status"`
 }
 
 func newApp() (*App, error) {
@@ -87,10 +82,6 @@ func (storage *Storage) findOrCreateTaskTenant(tenant string) (*TenantTask, erro
 	return &storage.Items[len(storage.Items)-1], nil
 }
 
-func getAllTasks(tenantTask *TenantTask) ([]Task, error) {
-	return tenantTask.Tasks, nil
-}
-
 func humanId(tenant string, seqId int) string {
 	return fmt.Sprintf("%s-%d", tenant, seqId)
 }
@@ -129,14 +120,19 @@ func saveFile(storage Storage) error {
 	return nil
 }
 
-func taskDone(taskId string, tasks []Task) ([]Task, error) {
-	for i := range tasks {
-		if tasks[i].ID == taskId {
-			tasks[i].IsDone = true
-			return tasks, nil
+func taskDone(humanId string, app *App) error {
+	lastSepIndex := strings.LastIndex(humanId, "-")
+	seqId, err := strconv.Atoi(humanId[lastSepIndex+1:])
+	if err != nil {
+		return fmt.Errorf("invalid task id: %s", humanId)
+	}
+	for i := range app.Current.Tasks {
+		if app.Current.Tasks[i].SeqId == seqId {
+			app.Current.Tasks[i].IsDone = true
+			return nil
 		}
 	}
-	return []Task{}, fmt.Errorf("task not found: %s", taskId)
+	return fmt.Errorf("task not found: %s", humanId)
 }
 
 func main() {
@@ -177,6 +173,19 @@ func main() {
 			for _, v := range app.Current.Tasks {
 				fmt.Printf("[%s] %s - %t\n", humanId(app.Current.Tenant, v.SeqId), v.Title, v.IsDone)
 			}
+		case "done":
+			if params == "" {
+				fmt.Fprintf(os.Stderr, "task id is required")
+				continue
+			}
+			if err := taskDone(params, app); err != nil {
+				fmt.Fprintf(os.Stderr, "Task done failed: %s\n", err)
+				continue
+			}
+		case "":
+			continue
+		default:
+			fmt.Printf("unknown command: %s\n", cmd)
 		}
 	}
 }
