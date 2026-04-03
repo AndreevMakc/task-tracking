@@ -2,100 +2,65 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
 	"strings"
+	"task-tracking/internal/domain"
+	"task-tracking/internal/repository"
+	"task-tracking/internal/storage/file"
 
 	"github.com/google/uuid"
 )
 
-const defaultTenant = "my-tenant"
-
 type App struct {
-	Storage Storage
-	Current *TenantTask
-}
-
-type Storage struct {
-	Items []TenantTask `json:"items"`
-}
-
-type TenantTask struct {
-	Tenant  string `json:"tenant"`
-	Counter int    `json:"counter"`
-	Tasks   []Task `json:"tasks"`
-}
-
-type Task struct {
-	ID     string `json:"id"`
-	SeqId  int    `json:"seq_id"`
-	Title  string `json:"title"`
-	IsDone bool   `json:"is_done"`
+	namespace           domain.Namespace
+	namespaceRepository repository.NamespaceRepository
 }
 
 func newApp() (*App, error) {
-	storage, err := loadFile()
+	app := App{}
+	namespaceRepo, err := file.NewNamespaceRepository(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("app init failed: %w", err)
+		return nil, fmt.Errorf("failed to init repository: %w", err)
 	}
-	var currentTenant string
+	app.namespaceRepository = namespaceRepo
+	var currentNamespace string
 	if len(os.Args) > 1 {
-		currentTenant = os.Args[1]
+		currentNamespace = os.Args[1]
 	}
-	currentTask, err := storage.findOrCreateTaskTenant(currentTenant)
+	if currentNamespace == "" {
+		currentNamespace = file.DefaultNamespaceName
+	}
+	namespace, err := app.namespaceRepository.FindByName(currentNamespace)
 	if err != nil {
-		return nil, fmt.Errorf("app init failed: %w", err)
+		return nil, fmt.Errorf("namespace not found: %w", err)
 	}
-	return &App{Storage: storage, Current: currentTask}, nil
-}
-
-func loadFile() (Storage, error) {
-	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		return Storage{}, nil
-	}
-
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		return Storage{}, fmt.Errorf("file read error: %w", err)
-	}
-
-	var storage Storage
-	if err := json.Unmarshal(data, &storage); err != nil {
-		return Storage{}, fmt.Errorf("JSON parsing error: %w", err)
-	}
-
-	return storage, nil
-}
-
-func (storage *Storage) findOrCreateTaskTenant(tenant string) (*TenantTask, error) {
-	if tenant == "" {
-		tenant = defaultTenant
-	}
-	for index := range storage.Items {
-		if storage.Items[index].Tenant == tenant {
-			return &storage.Items[index], nil
+	if namespace != nil {
+		app.namespace = *namespace
+	} else {
+		app.namespace = domain.Namespace{Name: currentNamespace}
+		if err := app.namespaceRepository.Save(app.namespace); err != nil {
+			return nil, fmt.Errorf("failed to create namespace: %w", err)
 		}
 	}
-	storage.Items = append(storage.Items, TenantTask{Tenant: tenant})
-	return &storage.Items[len(storage.Items)-1], nil
+	return &app, nil
 }
 
-func humanId(tenant string, seqId int) string {
-	return fmt.Sprintf("%s-%d", tenant, seqId)
+func humanId(namespace string, seqId int) string {
+	return fmt.Sprintf("%s-%d", namespace, seqId)
 }
 
 func genUUID() string {
 	return uuid.New().String()
 }
 
-func createTask(text string, tenantTask *TenantTask) (Task, error) {
+func createTask(text string, namespace *domain.Namespace) (domain.Task, error) {
 	if text == "" {
-		return Task{}, fmt.Errorf("task title is required")
+		return domain.Task{}, fmt.Errorf("task title is required")
 	}
-	tenantTask.Counter = tenantTask.Counter + 1
-	return Task{ID: genUUID(), SeqId: tenantTask.Counter, Title: text, IsDone: false}, nil
+	namespace.Counter = namespace.Counter + 1
+	return domain.Task{ID: genUUID(), SeqId: namespace.Counter, Title: text, IsDone: false}, nil
 }
 
 func handleInputCmd(text string) (cmd string, taskTitle string) {
@@ -109,26 +74,15 @@ func handleInputCmd(text string) (cmd string, taskTitle string) {
 
 const filePath = "tasks.json"
 
-func saveFile(storage Storage) error {
-	data, err := json.MarshalIndent(storage, "", " ")
-	if err != nil {
-		return fmt.Errorf("serialization error: %w", err)
-	}
-	if err := os.WriteFile(filePath, data, 0644); err != nil {
-		return fmt.Errorf("file write error: %w", err)
-	}
-	return nil
-}
-
 func taskDone(humanId string, app *App) error {
 	lastSepIndex := strings.LastIndex(humanId, "-")
 	seqId, err := strconv.Atoi(humanId[lastSepIndex+1:])
 	if err != nil {
 		return fmt.Errorf("invalid task id: %s", humanId)
 	}
-	for i := range app.Current.Tasks {
-		if app.Current.Tasks[i].SeqId == seqId {
-			app.Current.Tasks[i].IsDone = true
+	for i := range app.namespace.Tasks {
+		if app.namespace.Tasks[i].SeqId == seqId {
+			app.namespace.Tasks[i].IsDone = true
 			return nil
 		}
 	}
@@ -153,25 +107,25 @@ func main() {
 		cmd, params := handleInputCmd(text)
 		switch cmd {
 		case "exit":
-			if err := saveFile(app.Storage); err != nil {
+			if err := app.namespaceRepository.Save(app.namespace); err != nil {
 				fmt.Fprintf(os.Stderr, "File save error: %s\n", err)
 			}
 			fmt.Println("Goodbye")
 			return
 		case "add":
-			task, err := createTask(params, app.Current)
+			task, err := createTask(params, &app.namespace)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Task add error: %s\n", err)
 				continue
 			}
-			app.Current.Tasks = append(app.Current.Tasks, task)
+			app.namespace.Tasks = append(app.namespace.Tasks, task)
 		case "list":
-			if len(app.Current.Tasks) == 0 {
+			if len(app.namespace.Tasks) == 0 {
 				fmt.Println("No tasks yet")
 				continue
 			}
-			for _, v := range app.Current.Tasks {
-				fmt.Printf("[%s] %s - %t\n", humanId(app.Current.Tenant, v.SeqId), v.Title, v.IsDone)
+			for _, v := range app.namespace.Tasks {
+				fmt.Printf("[%s] %s - %t\n", humanId(app.namespace.Name, v.SeqId), v.Title, v.IsDone)
 			}
 		case "done":
 			if params == "" {
