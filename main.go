@@ -4,13 +4,11 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 	"task-tracking/internal/domain"
 	"task-tracking/internal/repository"
+	"task-tracking/internal/service"
 	"task-tracking/internal/storage/file"
-
-	"github.com/google/uuid"
 )
 
 type App struct {
@@ -51,18 +49,6 @@ func humanId(namespace string, seqId int) string {
 	return fmt.Sprintf("%s-%d", namespace, seqId)
 }
 
-func genUUID() string {
-	return uuid.New().String()
-}
-
-func createTask(text string, namespace *domain.Namespace) (domain.Task, error) {
-	if text == "" {
-		return domain.Task{}, fmt.Errorf("task title is required")
-	}
-	namespace.Counter = namespace.Counter + 1
-	return domain.Task{ID: genUUID(), SeqId: namespace.Counter, Title: text, IsDone: false}, nil
-}
-
 func handleInputCmd(text string) (cmd string, taskTitle string) {
 	sliceText := strings.SplitN(text, " ", 2)
 	cmd = sliceText[0]
@@ -73,21 +59,6 @@ func handleInputCmd(text string) (cmd string, taskTitle string) {
 }
 
 const filePath = "tasks.json"
-
-func taskDone(humanId string, app *App) error {
-	lastSepIndex := strings.LastIndex(humanId, "-")
-	seqId, err := strconv.Atoi(humanId[lastSepIndex+1:])
-	if err != nil {
-		return fmt.Errorf("invalid task id: %s", humanId)
-	}
-	for i := range app.namespace.Tasks {
-		if app.namespace.Tasks[i].SeqId == seqId {
-			app.namespace.Tasks[i].IsDone = true
-			return nil
-		}
-	}
-	return fmt.Errorf("task not found: %s", humanId)
-}
 
 func main() {
 	app, err := newApp()
@@ -113,7 +84,7 @@ func main() {
 			fmt.Println("Goodbye")
 			return
 		case "add":
-			task, err := createTask(params, &app.namespace)
+			task, err := service.CreateTask(params, &app.namespace)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Task add error: %s\n", err)
 				continue
@@ -132,7 +103,7 @@ func main() {
 				fmt.Fprintf(os.Stderr, "task id is required")
 				continue
 			}
-			if err := taskDone(params, app); err != nil {
+			if err := service.TaskDone(params, &app.namespace); err != nil {
 				fmt.Fprintf(os.Stderr, "Task done failed: %s\n", err)
 				continue
 			}
