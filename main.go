@@ -2,93 +2,65 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
+	"task-tracking/internal/domain"
+	"task-tracking/internal/repository"
+	"task-tracking/internal/storage/file"
 
 	"github.com/google/uuid"
 )
 
-const tenant = "my-tenant"
-
 type App struct {
-	Storage Storage
-	Current *TenantTask
+	namespace           domain.Namespace
+	namespaceRepository repository.NamespaceRepository
 }
 
-type Storage struct {
-	Items []TenantTask `json:"items"`
-}
-
-type TenantTask struct {
-	Tenant  string `json:"tenant"`
-	Counter int    `json:"counter"`
-	Tasks   []Task `json:"tasks"`
-}
-
-type Task struct {
-	ID     string `json:"id"`
-	SeqId  int    `json:"seq_id"`
-	Title  string `json:"title"`
-	IsDone bool   `json:"is_done"`
-}
-
-type TaskView struct {
-	HumanId string `json:"id"`
-	Title   string `json:"title"`
-	Status  string `json:"status"`
-}
-
-func (app App) init() (Storage, error) {
-	storage, err := loadFile()
+func newApp() (*App, error) {
+	app := App{}
+	namespaceRepo, err := file.NewNamespaceRepository(filePath)
 	if err != nil {
-		panic(fmt.Sprint("app init failed:", err))
+		return nil, fmt.Errorf("failed to init repository: %w", err)
 	}
-	return storage, nil
-}
-
-func loadFile() (Storage, error) {
-	if _, err := os.Stat(filePath); os.IsNotExist(err) {
-		return Storage{}, nil
+	app.namespaceRepository = namespaceRepo
+	var currentNamespace string
+	if len(os.Args) > 1 {
+		currentNamespace = os.Args[1]
 	}
-
-	data, err := os.ReadFile(filePath)
+	if currentNamespace == "" {
+		currentNamespace = file.DefaultNamespaceName
+	}
+	namespace, err := app.namespaceRepository.FindByName(currentNamespace)
 	if err != nil {
-		return Storage{}, fmt.Errorf("file read error: %w", err)
+		return nil, fmt.Errorf("namespace not found: %w", err)
 	}
-
-	var storage Storage
-	if err := json.Unmarshal(data, &storage); err != nil {
-		return Storage{}, fmt.Errorf("JSON parsing error: %w", err)
-	}
-
-	return storage, nil
-}
-
-func (storage *Storage) findOrCreateTaskTenant(tenant string) (*TenantTask, error) {
-	for index := range storage.Items {
-		if storage.Items[index].Tenant == tenant {
-			return &storage.Items[index], nil
+	if namespace != nil {
+		app.namespace = *namespace
+	} else {
+		app.namespace = domain.Namespace{Name: currentNamespace}
+		if err := app.namespaceRepository.Save(app.namespace); err != nil {
+			return nil, fmt.Errorf("failed to create namespace: %w", err)
 		}
 	}
-	storage.Items = append(storage.Items, TenantTask{Tenant: tenant})
-	return &storage.Items[len(storage.Items)-1], nil
+	return &app, nil
 }
 
-func humanId(tenant string, seqId int) string {
-	return fmt.Sprintf("%s-%d", tenant, seqId)
+func humanId(namespace string, seqId int) string {
+	return fmt.Sprintf("%s-%d", namespace, seqId)
 }
 
 func genUUID() string {
 	return uuid.New().String()
 }
 
-func createTask(text string) (Task, error) {
+func createTask(text string, namespace *domain.Namespace) (domain.Task, error) {
 	if text == "" {
-		return Task{}, fmt.Errorf("task title is required")
+		return domain.Task{}, fmt.Errorf("task title is required")
 	}
-	return Task{ID: genUUID(), Title: text, IsDone: false}, nil
+	namespace.Counter = namespace.Counter + 1
+	return domain.Task{ID: genUUID(), SeqId: namespace.Counter, Title: text, IsDone: false}, nil
 }
 
 func handleInputCmd(text string) (cmd string, taskTitle string) {
@@ -102,85 +74,72 @@ func handleInputCmd(text string) (cmd string, taskTitle string) {
 
 const filePath = "tasks.json"
 
-func saveFile(tasks []Task) error {
-	data, err := json.MarshalIndent(tasks, "", " ")
+func taskDone(humanId string, app *App) error {
+	lastSepIndex := strings.LastIndex(humanId, "-")
+	seqId, err := strconv.Atoi(humanId[lastSepIndex+1:])
 	if err != nil {
-		return fmt.Errorf("serialization error: %w", err)
+		return fmt.Errorf("invalid task id: %s", humanId)
 	}
-	if err := os.WriteFile(filePath, data, 0644); err != nil {
-		return fmt.Errorf("file write error: %w", err)
-	}
-	return nil
-}
-
-func taskDone(taskId string, tasks []Task) ([]Task, error) {
-	for i := range tasks {
-		if tasks[i].ID == taskId {
-			tasks[i].IsDone = true
-			return tasks, nil
+	for i := range app.namespace.Tasks {
+		if app.namespace.Tasks[i].SeqId == seqId {
+			app.namespace.Tasks[i].IsDone = true
+			return nil
 		}
 	}
-	return []Task{}, fmt.Errorf("task not found: %s", taskId)
+	return fmt.Errorf("task not found: %s", humanId)
 }
 
 func main() {
-	var app App
-	storage, err := app.init()
+	app, err := newApp()
 	if err != nil {
-		panic(err)
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
 	}
-	tasks, _ := storage.findOrCreateTaskTenant(tenant)
 	scanner := bufio.NewScanner(os.Stdin)
 	fmt.Println("---Task tracking is running---")
 	fmt.Println("Type 'add', 'list', 'done' or 'exit'")
-	for i := range tasks.Tasks {
-		fmt.Println(humanId(tasks.Tenant, tasks.Tasks[i].SeqId))
-	}
-	// for {
-	// 	fmt.Print("> ")
-	// 	if !scanner.Scan() {
-	// 		break
-	// 	}
-	// 	text := scanner.Text()
-	// 	cmd, params := handleInputCmd(text)
-	// 	switch cmd {
-	// 	case "exit":
-	// 		if err := saveFile(tasks); err != nil {
-	// 			fmt.Fprintf(os.Stderr, "File save error: %s\n", err)
-	// 		}
-	// 		fmt.Println("Goodbye")
-	// 		return
-	// 	case "add":
-	// 		task, err := createTask(params)
-	// 		if err != nil {
-	// 			fmt.Fprintf(os.Stderr, "Task add error: %s\n", err)
-	// 			continue
-	// 		}
-	// 		tasks = append(tasks, task)
-	// 		fmt.Printf("Task '%s' has been added\n", task.Title)
-	// 	case "list":
-	// 		if len(tasks) == 0 {
-	// 			fmt.Println("No tasks yet")
-	// 			continue
-	// 		}
-	// 		for _, v := range tasks {
-	// 			fmt.Printf("[%s] %s - %t\n", v.ID, v.Title, v.IsDone)
-	// 		}
-	// 	case "done":
-	// 		updatedTasks, err := taskDone(params, tasks)
-	// 		if err != nil {
-	// 			fmt.Fprintf(os.Stderr, "Task done error: %s\n", err)
-	// 			continue
-	// 		}
-	// 		tasks = updatedTasks
-	// 		fmt.Printf("Task %s has been done\n", params)
-	// 	case "":
-	// 		continue
-	// 	default:
-	// 		fmt.Printf("Unknown command: %s\n", cmd)
-	// 	}
-	// }
-	if err := scanner.Err(); err != nil {
-		fmt.Fprintln(os.Stderr, "reading standart input: ", err)
+	for {
+		fmt.Print(">")
+		if !scanner.Scan() {
+			break
+		}
+		text := scanner.Text()
+		cmd, params := handleInputCmd(text)
+		switch cmd {
+		case "exit":
+			if err := app.namespaceRepository.Save(app.namespace); err != nil {
+				fmt.Fprintf(os.Stderr, "File save error: %s\n", err)
+			}
+			fmt.Println("Goodbye")
+			return
+		case "add":
+			task, err := createTask(params, &app.namespace)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Task add error: %s\n", err)
+				continue
+			}
+			app.namespace.Tasks = append(app.namespace.Tasks, task)
+		case "list":
+			if len(app.namespace.Tasks) == 0 {
+				fmt.Println("No tasks yet")
+				continue
+			}
+			for _, v := range app.namespace.Tasks {
+				fmt.Printf("[%s] %s - %t\n", humanId(app.namespace.Name, v.SeqId), v.Title, v.IsDone)
+			}
+		case "done":
+			if params == "" {
+				fmt.Fprintf(os.Stderr, "task id is required")
+				continue
+			}
+			if err := taskDone(params, app); err != nil {
+				fmt.Fprintf(os.Stderr, "Task done failed: %s\n", err)
+				continue
+			}
+		case "":
+			continue
+		default:
+			fmt.Printf("unknown command: %s\n", cmd)
+		}
 	}
 }
