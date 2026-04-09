@@ -6,47 +6,29 @@ import (
 	"os"
 	"strings"
 	"task-tracking/internal/domain"
-	"task-tracking/internal/repository"
 	"task-tracking/internal/service"
-	"task-tracking/internal/storage/file"
+	"task-tracking/internal/storage/filestorage"
 )
 
 type App struct {
-	namespace           domain.Namespace
-	namespaceRepository repository.NamespaceRepository
+	taskService *service.TaskService
+}
+
+func getNamespace() string {
+	if len(os.Args) > 1 {
+		return os.Args[1]
+	}
+	return domain.DefaultNamespace
 }
 
 func newApp() (*App, error) {
-	app := App{}
-	namespaceRepo, err := file.NewNamespaceRepository(filePath)
+	fileNamespaceRepo, err := filestorage.NewFileNamespaceRepository("")
 	if err != nil {
-		return nil, fmt.Errorf("failed to init repository: %w", err)
+		return nil, fmt.Errorf("init app failed: %w", err)
 	}
-	app.namespaceRepository = namespaceRepo
-	var currentNamespace string
-	if len(os.Args) > 1 {
-		currentNamespace = os.Args[1]
-	}
-	if currentNamespace == "" {
-		currentNamespace = file.DefaultNamespaceName
-	}
-	namespace, err := app.namespaceRepository.FindByName(currentNamespace)
-	if err != nil {
-		return nil, fmt.Errorf("namespace not found: %w", err)
-	}
-	if namespace != nil {
-		app.namespace = *namespace
-	} else {
-		app.namespace = domain.Namespace{Name: currentNamespace}
-		if err := app.namespaceRepository.Save(app.namespace); err != nil {
-			return nil, fmt.Errorf("failed to create namespace: %w", err)
-		}
-	}
+	taskService := service.NewTaskService(fileNamespaceRepo)
+	app := App{taskService: taskService}
 	return &app, nil
-}
-
-func humanId(namespace string, seqId int) string {
-	return fmt.Sprintf("%s-%d", namespace, seqId)
 }
 
 func handleInputCmd(text string) (cmd string, taskTitle string) {
@@ -57,8 +39,6 @@ func handleInputCmd(text string) (cmd string, taskTitle string) {
 	}
 	return cmd, taskTitle
 }
-
-const filePath = "tasks.json"
 
 func main() {
 	app, err := newApp()
@@ -78,32 +58,23 @@ func main() {
 		cmd, params := handleInputCmd(text)
 		switch cmd {
 		case "exit":
-			if err := app.namespaceRepository.Save(app.namespace); err != nil {
-				fmt.Fprintf(os.Stderr, "File save error: %s\n", err)
-			}
 			fmt.Println("Goodbye")
 			return
 		case "add":
-			task, err := service.CreateTask(params, &app.namespace)
-			if err != nil {
+			if _, err := app.taskService.CreateTask(params, getNamespace()); err != nil {
 				fmt.Fprintf(os.Stderr, "Task add error: %s\n", err)
 				continue
 			}
-			app.namespace.Tasks = append(app.namespace.Tasks, task)
 		case "list":
-			if len(app.namespace.Tasks) == 0 {
-				fmt.Println("No tasks yet")
-				continue
-			}
-			for _, v := range app.namespace.Tasks {
-				fmt.Printf("[%s] %s - %t\n", humanId(app.namespace.Name, v.SeqId), v.Title, v.IsDone)
+			for _, v := range app.taskService.ShowList(getNamespace()) {
+				fmt.Println(v)
 			}
 		case "done":
 			if params == "" {
 				fmt.Fprintf(os.Stderr, "task id is required")
 				continue
 			}
-			if err := service.TaskDone(params, &app.namespace); err != nil {
+			if err := app.taskService.TaskDone(params, getNamespace()); err != nil {
 				fmt.Fprintf(os.Stderr, "Task done failed: %s\n", err)
 				continue
 			}
