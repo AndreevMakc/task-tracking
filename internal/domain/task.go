@@ -6,9 +6,3 @@ type Task struct {
 	Title  string
 	IsDone bool
 }
-
-type Namespace struct {
-	Name    string
-	Counter int
-	Tasks   []Task
-}
