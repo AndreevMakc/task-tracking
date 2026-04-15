@@ -80,3 +80,11 @@ func (s *TaskService) ShowList(namespaceName string) []string {
 	}
 	return tasks
 }
+
+func (s *TaskService) GetTasks(namespaceName string) []domain.Task {
+	namespace := s.namespaceRepository.FindByName(namespaceName)
+	if namespace == nil {
+		return []domain.Task{}
+	}
+	return namespace.Tasks
+}
