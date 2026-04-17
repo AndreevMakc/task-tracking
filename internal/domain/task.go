@@ -1,8 +1,7 @@
 package domain
 
 type Task struct {
-	ID     string
-	SeqId  int
+	BaseModelUUID
 	Title  string
-	IsDone bool
+	Status TaskStatus
 }
