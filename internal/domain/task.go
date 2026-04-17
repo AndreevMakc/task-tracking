@@ -2,6 +2,8 @@ package domain
 
 type Task struct {
 	BaseModelUUID
-	Title  string
-	Status TaskStatus
+	Code        string
+	Title       string
+	Status      TaskStatus
+	NamespaceID int
 }
