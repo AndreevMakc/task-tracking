@@ -1,9 +1,14 @@
 package repository
 
-import "task-tracking/internal/domain"
+import (
+	"context"
+	"task-tracking/internal/domain"
+)
 
 type TaskRepository interface {
-	Save(task domain.Task, namespaceName string) error
-	FindBySeqId(seqId int, namespaceName string) (*domain.Task, error)
-	FindAllByNamespaceName(namespaceName string) *[]domain.Task
+	Create(ctx context.Context, task domain.Task) (*domain.Task, error)
+	Update(ctx context.Context, task domain.Task) (*domain.Task, error)
+	GetByNamespaceId(ctx context.Context, namespaceId int64) ([]domain.Task, error)
+	GetByCode(ctx context.Context, code string) (*domain.Task, error)
+	Delete(ctx context.Context, code string) error
 }

@@ -1,8 +1,14 @@
 package repository
 
-import "task-tracking/internal/domain"
+import (
+	"context"
+	"task-tracking/internal/domain"
+)
 
 type NamespaceRepository interface {
-	Save(namespace domain.Namespace) error
-	FindByName(name string) *domain.Namespace
+	Create(ctx context.Context, namespace domain.Namespace) (*domain.Namespace, error)
+	Update(ctx context.Context, namespace domain.Namespace) (*domain.Namespace, error)
+	GetByNamespaceId(ctx context.Context, namespaceId int64) (*domain.Namespace, error)
+	GetByNamespaceName(ctx context.Context, namespaceName string) (*domain.Namespace, error)
+	Delete(ctx context.Context, namespaceId int64) error
 }
