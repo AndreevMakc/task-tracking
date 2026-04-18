@@ -10,5 +10,4 @@ type TaskRepository interface {
 	Update(ctx context.Context, task domain.Task) (*domain.Task, error)
 	GetByNamespaceId(ctx context.Context, namespaceId int64) ([]domain.Task, error)
 	GetByCode(ctx context.Context, code string) (*domain.Task, error)
-	Delete(ctx context.Context, code string) error
 }
