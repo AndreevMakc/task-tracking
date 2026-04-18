@@ -14,7 +14,7 @@ type BaseModelUUID struct {
 }
 
 type BaseModelID struct {
-	ID        int
+	ID        int64
 	CreatedAt time.Time
 	UpdatedAt time.Time
 	DeletedAt *time.Time
