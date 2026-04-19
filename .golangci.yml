@@ -1,0 +1,21 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+formatters:
+  enable:
+    - gofumpt
+    - golines
+    - gci
+
+  settings:
+    golines:
+      max-len: 100
+      tab-len: 4
+
+    gci:
+      sections:
+        - standard
+        - default
+        - prefix(task-tracking)
