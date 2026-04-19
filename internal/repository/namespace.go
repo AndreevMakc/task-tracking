@@ -10,5 +10,4 @@ type NamespaceRepository interface {
 	Update(ctx context.Context, namespace domain.Namespace) (*domain.Namespace, error)
 	GetByNamespaceId(ctx context.Context, namespaceId int64) (*domain.Namespace, error)
 	GetByNamespaceName(ctx context.Context, namespaceName string) (*domain.Namespace, error)
-	Delete(ctx context.Context, namespaceId int64) error
 }
