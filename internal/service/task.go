@@ -1,90 +1,109 @@
 package service
 
 import (
+	"context"
 	"fmt"
-	"strconv"
-	"strings"
+
 	"task-tracking/internal/domain"
 	"task-tracking/internal/repository"
-
-	"github.com/google/uuid"
 )
 
-type NamespaceService struct {
-	namespaceRepo repository.NamespaceRepository
-}
-
-func NewNamespaceService(repo repository.NamespaceRepository) *NamespaceService {
-	return &NamespaceService{namespaceRepo: repo}
-}
-
 type TaskService struct {
-	namespaceRepository repository.NamespaceRepository
+	namespaceRepo repository.NamespaceRepository
+	taskRepo      repository.TaskRepository
 }
 
-func NewTaskService(repo repository.NamespaceRepository) *TaskService {
-	return &TaskService{namespaceRepository: repo}
+func NewTaskService(
+	namespaceRepo repository.NamespaceRepository,
+	taskRepo repository.TaskRepository,
+) *TaskService {
+	return &TaskService{namespaceRepo: namespaceRepo, taskRepo: taskRepo}
 }
 
-func (s *TaskService) CreateTask(text string, namespaceName string) (domain.Task, error) {
-	if text == "" {
-		return domain.Task{}, fmt.Errorf("task title is required")
+func (s *TaskService) CreateTask(
+	ctx context.Context,
+	title string,
+	namespaceName string,
+) (*domain.Task, error) {
+	namespaceId, err := s.resolveNamespaceId(ctx, namespaceName)
+	if err != nil {
+		return nil, fmt.Errorf("resolve namespace: %w", err)
 	}
-	namespace := s.namespaceRepository.FindByName(namespaceName)
-	if namespace == nil {
-		namespace = &domain.Namespace{Name: namespaceName}
-	}
-	task := domain.Task{ID: uuid.New().String(), SeqId: len(namespace.Tasks) + 1, Title: text, IsDone: false}
-	namespace.Tasks = append(namespace.Tasks, task)
-	if err := s.namespaceRepository.Save(*namespace); err != nil {
-		return domain.Task{}, fmt.Errorf("task save error, %w", err)
+	task, err := s.taskRepo.Create(ctx, domain.Task{Title: title, NamespaceID: namespaceId})
+	if err != nil {
+		return nil, fmt.Errorf("task create: %w", err)
 	}
 	return task, nil
 }
 
-func (s *TaskService) TaskDone(humanId string, namespaceName string) error {
-	namespace := s.namespaceRepository.FindByName(namespaceName)
-	lastSepIndex := strings.LastIndex(humanId, "-")
-	seqId, err := strconv.Atoi(humanId[lastSepIndex+1:])
+func (s *TaskService) TaskDone(ctx context.Context, code string) (*domain.Task, error) {
+	task, err := s.changeTaskStatus(ctx, code, domain.TaskStatusDone)
 	if err != nil {
-		return fmt.Errorf("invalid task id: %s", humanId)
+		return nil, fmt.Errorf("task done: %w", err)
 	}
-	found := false
-	for i := range namespace.Tasks {
-		if namespace.Tasks[i].SeqId == seqId {
-			namespace.Tasks[i].IsDone = true
-			found = true
-			break
-		}
-	}
-	if !found {
-		return fmt.Errorf("task not found: %s", humanId)
-	}
-	return s.namespaceRepository.Save(*namespace)
+	return task, nil
 }
 
-func (s *TaskService) ShowList(namespaceName string) []string {
-	namespace := s.namespaceRepository.FindByName(namespaceName)
-	var tasks []string
-	if namespace != nil {
-		for i := range namespace.Tasks {
-			tasks = append(tasks, fmt.Sprintf("[%s-%d] %s [%t]",
-				namespace.Name,
-				namespace.Tasks[i].SeqId,
-				namespace.Tasks[i].Title,
-				namespace.Tasks[i].IsDone))
-		}
+func (s *TaskService) TaskTrash(ctx context.Context, code string) (*domain.Task, error) {
+	task, err := s.changeTaskStatus(ctx, code, domain.TaskStatusTrashed)
+	if err != nil {
+		return nil, fmt.Errorf("task trash: %w", err)
 	}
-	if len(tasks) == 0 {
-		tasks = append(tasks, "No tasks yet")
-	}
-	return tasks
+	return task, nil
 }
 
-func (s *TaskService) GetTasks(namespaceName string) []domain.Task {
-	namespace := s.namespaceRepository.FindByName(namespaceName)
+func (s *TaskService) GetTasksByNamespace(
+	ctx context.Context,
+	namespaceName string,
+) ([]domain.Task, error) {
+	namespace, err := s.namespaceRepo.GetByNamespaceName(ctx, namespaceName)
+	if err != nil {
+		return nil, fmt.Errorf("get namespace by name: %w", err)
+	}
 	if namespace == nil {
-		return []domain.Task{}
+		return nil, fmt.Errorf("namespace %s not found", namespaceName)
 	}
-	return namespace.Tasks
+	tasks, err := s.taskRepo.GetByNamespaceId(ctx, namespace.ID)
+	if err != nil {
+		return nil, fmt.Errorf("get tasks by namespace id: %w", err)
+	}
+	return tasks, nil
+}
+
+func (s *TaskService) resolveNamespaceId(ctx context.Context, namespaceName string) (int64, error) {
+	namespace, err := s.namespaceRepo.GetByNamespaceName(ctx, namespaceName)
+	if err != nil {
+		return 0, fmt.Errorf("get namespace by name: %w", err)
+	}
+	if namespace == nil {
+		namespace, err = s.namespaceRepo.GetByNamespaceName(ctx, domain.DefaultNamespace)
+		if err != nil {
+			return 0, fmt.Errorf("get default namespace by name: %w", err)
+		}
+		if namespace == nil {
+			return 0, fmt.Errorf("default namespace not found")
+		}
+	}
+
+	return namespace.ID, nil
+}
+
+func (s *TaskService) changeTaskStatus(
+	ctx context.Context,
+	code string,
+	status domain.TaskStatus,
+) (*domain.Task, error) {
+	task, err := s.taskRepo.GetByCode(ctx, code)
+	if err != nil {
+		return nil, fmt.Errorf("get task by code: %w", err)
+	}
+	if task == nil {
+		return nil, fmt.Errorf("task %s not found", code)
+	}
+	task.Status = status
+	task, err = s.taskRepo.Update(ctx, *task)
+	if err != nil {
+		return nil, fmt.Errorf("task update: %w", err)
+	}
+	return task, nil
 }

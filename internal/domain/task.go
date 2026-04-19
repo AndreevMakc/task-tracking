@@ -5,5 +5,5 @@ type Task struct {
 	Code        string
 	Title       string
 	Status      TaskStatus
-	NamespaceID int
+	NamespaceID int64
 }

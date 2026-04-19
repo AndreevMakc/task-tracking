@@ -3,9 +3,10 @@ package postgres
 import (
 	"context"
 	"fmt"
-	"task-tracking/internal/domain"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"task-tracking/internal/domain"
 )
 
 type TaskRepo struct {
@@ -43,7 +44,6 @@ func (r *TaskRepo) Update(ctx context.Context, task domain.Task) (*domain.Task, 
 		task.Title, task.Status,
 		task.Code,
 	).Scan(&task.ID, &task.Code, &task.Title, &task.Status, &task.UpdatedAt)
-
 	if err != nil {
 		return nil, fmt.Errorf("update task: %w", err)
 	}
@@ -96,7 +96,6 @@ func (r *TaskRepo) GetByCode(ctx context.Context, code string) (*domain.Task, er
 		&task.Status, &task.CreatedAt,
 		&task.UpdatedAt, &task.DeletedAt,
 	)
-
 	if err != nil {
 		return nil, fmt.Errorf("get task by code: %w", err)
 	}
