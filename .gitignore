@@ -1,5 +1,5 @@
-# Created by https://www.toptal.com/developers/gitignore/api/macos,go,visualstudiocode,pycharm
-# Edit at https://www.toptal.com/developers/gitignore?templates=macos,go,visualstudiocode,pycharm
+# Created by https://www.toptal.com/developers/gitignore/api/macos,go,visualstudiocode,goland
+# Edit at https://www.toptal.com/developers/gitignore?templates=macos,go,visualstudiocode,goland
 
 ### Go ###
 # If you prefer the allow list template instead of the deny list, see community template:
@@ -21,8 +21,9 @@
 # Dependency directories (remove the comment below to include it)
 # vendor/
 
-# Go workspace filestorage
+# Go workspace file
 go.work
+go.work.sum
 
 ### macOS ###
 # General
@@ -74,6 +75,31 @@ Temporary Items
 # Ignore all local history of files
 .history
 .ionide
+
+### JetBrains (GoLand / IntelliJ IDEA) ###
+# Project settings directory — contains user-specific IDE config
+.idea/
+
+# Module / project files
+*.iml
+*.iws
+*.ipr
+
+# Build output
+out/
+
+# CMake build directories (if used)
+cmake-build-*/
+
+### JetBrains Patch ###
+# Shelved changes
+.idea/shelf/
+
+# Editor-based HTTP Client requests
+.idea/httpRequests/
+
+# Sonarlint plugin
+.idea/sonarlint/
 
 # Project specific
 tasks.json
